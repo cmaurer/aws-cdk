@@ -80,7 +80,7 @@ async function parseCommandLineArguments() {
  *
  * Command handlers are supposed to be (args) => void, but ours are actually
  * (args) => Promise<number>, so we deal with the asyncness by copying the actual
- * handler object to `args.commandHandler` which will be 'await'ed later on
+ * handler object to `args.commandHandler` which will be executed an 'await'ed later on
  * (instead of awaiting 'main').
  *
  * Also adds exception handling so individual command handlers don't all have to do it.
@@ -92,18 +92,15 @@ function decorateCommand(commandObject: yargs.CommandModule): yargs.CommandModul
   return {
     ...commandObject,
     handler(args: yargs.Arguments) {
-      if (args.verbose) {
-        setVerbose();
-      }
-      args.commandHandler = wrapExceptionHandler(args.verbose, commandObject.handler as any)(args);
+      args.commandHandler = wrapExceptionHandler(args.verbose, commandObject.handler as any);
     }
   };
 }
 
 function wrapExceptionHandler(verbose: boolean, fn: (args: any) => Promise<number>) {
-  return async (a: any) => {
+  return async () => {
     try {
-      return await fn(a);
+      return await fn.apply(fn, arguments);
     } catch (e) {
       if (verbose) {
         error(e);
@@ -166,7 +163,7 @@ async function initCommandLine() {
 
   const cmd = argv._[0];
 
-  const returnValue = await (argv.commandHandler || main(cmd, argv));
+  const returnValue = argv.commandHandler ? await argv.commandHandler(argv) : await main(cmd, argv);
   if (typeof returnValue === 'object') {
     return toJsonOrYaml(returnValue);
   } else if (typeof returnValue === 'string') {
