@@ -118,6 +118,13 @@ export class SDK {
     });
   }
 
+  public async secretsManager(environment: Environment, mode: Mode): Promise<AWS.SecretsManager> {
+    return new AWS.SecretsManager({
+      region: environment.region,
+      credentials: await this.credentialsCache.get(environment.account, mode)
+    });
+  }
+
   public async defaultRegion(): Promise<string | undefined> {
     return await getCLICompatibleDefaultRegion(this.profile);
   }

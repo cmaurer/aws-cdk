@@ -3,6 +3,8 @@
  */
 export const SECRET_METADATA = 'aws:cdk:secret';
 
+export type SecretMetadataEntry = SecretsManagerSecretMetadataEntry;
+
 export interface SecretsManagerSecretMetadataEntry {
   /**
    * The type of secret

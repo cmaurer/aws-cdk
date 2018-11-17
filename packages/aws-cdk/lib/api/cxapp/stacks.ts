@@ -192,3 +192,22 @@ export class AppStacks {
 export function listStackNames(stacks: cxapi.SynthesizedStack[]): string {
   return stacks.map(s => s.name).join(', ');
 }
+
+/**
+ * Collect all metadata entries of a particular type in the given set of stacks
+ *
+ * Assume their associated 'data' is of the given type.
+ *
+ * paths will always contain exactly one path.
+ */
+export function collectMetadataEntries(metadataType: string, stacks: cxapi.SynthesizedStack[], collector: MetadataCollector) {
+  for (const stack of stacks) {
+    for (const [resourcePath, entries] of Object.entries(stack.metadata)) {
+      entries.filter(e => e.type === metadataType).forEach(e => {
+        collector(e, resourcePath, stack);
+      });
+    }
+  }
+}
+
+type MetadataCollector = (entry: cxapi.MetadataEntry, resourcePath: string, stack: cxapi.SynthesizedStack) => void;
