@@ -24,6 +24,7 @@ Currently, you can get values into your app from outside your app through any of
 - Using a context variable
 - Using an environment variable
 - Using an SSM Parameter Store variable
+- Using a Secrets manager value
 - Using a value from another stack
 - Using a |CFN| parameter
 - Using a resource in an existing |CFN| template
@@ -92,6 +93,56 @@ which uses the value of the SSM variable **my-awesome-value**.
     const myvalue = new SSMParameterProvider(this).getString("my-awesome-value");
 
 See the :doc:`context` topic for information about the :py:class:`SSMParameterProvider <@aws-cdk/cdk.SSMParameterProvider>`.
+
+.. _using_value_from_secrets_manager:
+
+Getting a Value from AWS Secrets Manager
+========================================
+
+To use values from AWS Secrets Manager in your CDK app, create an instance of :py:class:`SecretsManagerValue
+<@aws-cdk/cdk.SecretsManagerValue>`. It represents a value that is retrieved from Secrets Manager and used
+at CloudFormation deployment time.
+
+.. code-block:: ts
+
+    const loginSecret = new cdk.SecretsManagerValue(stack, 'Secret', { secretId: 'MyLogin' });
+
+    // Retrieve a value from the secret's JSON
+    const username = loginSecret.jsonValue('username');
+    const password = loginSecret.jsonValue('password');
+
+    // Retrieve the whole secret's string value
+    const fullValue = loginSecret.value;
+
+To get a list of all secrets used in your app, run ``cdk secrets``. You will see something like this:
+
+.. code-block::
+
+    $ cdk secrets
+
+    Secrets used this app:
+
+    ┌───┬───────────────────┬──────────────────────────────────────────────────────────────┐
+    │ # │ Secret            │ Used                                                         │
+    ├───┼───────────────────┼──────────────────────────────────────────────────────────────┤
+    │ 1 │ MyLogin.username  │ /MyStack/Secret                                              │
+    ├───┼───────────────────┼──────────────────────────────────────────────────────────────┤
+    │ 2 │ MyLogin.password  │ /MyStack/Secret                                              │
+    └───┴───────────────────┴──────────────────────────────────────────────────────────────┘
+
+Use ``cdk secrets --write MyLogin.username`` to write a value for the secret:
+
+.. code-block::
+
+    $ cdk secrets --write MyLogin.username
+
+    New value for secret MyLogin.username:
+    Confirm new secret value:
+    Successfully wrote secret arn:aws:secretsmanager:us-east-1:123456789012:secret:MyLogin-GJB3AI.
+    Redeploy to apply the new value to your app.
+
+Finally run ``cdk deploy`` to deploy your application with the secret values.
+
 
 .. _passing_in_value_between_stacks:
 
@@ -197,8 +248,8 @@ where **S3Bucket** is the logical ID of the bucket in your template:
       "Properties": {
           ...
       }
-   }   
-   
+   }
+
 You can include this bucket in your |cdk| app,
 as shown in the following example
 (note that you cannot use this method in an |l2| construct):
@@ -207,7 +258,7 @@ as shown in the following example
 
    import cdk = require("@aws-cdk/cdk");
    import fs = require("fs");
-   
+
    new cdk.Include(this, "ExistingInfrastructure", {
       template: JSON.parse(fs.readFileSync("my-template.json").toString())
    });

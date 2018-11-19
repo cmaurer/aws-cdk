@@ -23,8 +23,8 @@ const loginSecret = new cdk.SecretsManagerValue(stack, 'Secret', { secretId: 'RD
 const cluster = new DatabaseCluster(stack, 'Database', {
   engine: DatabaseClusterEngine.Aurora,
   masterUser: {
-    username: loginSecret.jsonKey('username'),
-    password: loginSecret.jsonKey('password'),
+    username: loginSecret.jsonValue('username'),
+    password: loginSecret.jsonValue('password'),
   },
   instanceProps: {
     instanceType: new ec2.InstanceTypePair(ec2.InstanceClass.Burstable2, ec2.InstanceSize.Small),

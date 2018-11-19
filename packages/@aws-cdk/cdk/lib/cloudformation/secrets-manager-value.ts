@@ -1,6 +1,6 @@
 import cxapi = require('@aws-cdk/cx-api');
 import { Construct } from "../core/construct";
-import { Token, unresolved } from "../core/tokens";
+import { Token } from "../core/tokens";
 
 /**
  * Properties for a SecretsManagerValue
@@ -34,13 +34,13 @@ export interface SecretsManagerValueProps {
  * References a secret value in Secrets Manager
  *
  * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/dynamic-references.html
+ * @see https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-secretsmanager-secret.html
  */
 export class SecretsManagerValue extends Construct {
   private readonly emittedMeta = new Set<string>();
 
   constructor(parent: Construct, id: string, private readonly props: SecretsManagerValueProps) {
     super(parent, id);
-
   }
 
   /**
@@ -53,7 +53,7 @@ export class SecretsManagerValue extends Construct {
   /**
    * Return a key from the JSON object that is stored in the secret
    */
-  public jsonKey(key: string) {
+  public jsonValue(key: string) {
     return this.makeResolveString(key);
   }
 
@@ -67,12 +67,6 @@ export class SecretsManagerValue extends Construct {
       this.props.versionStage || '',
       this.props.versionId || ''
     ];
-
-    for (const part of parts) {
-      if (unresolved(part)) {
-        throw new Error(`Cannot use unresolved values when constructing a SecretsManagerValue, got: ${part}`);
-      }
-    }
 
     // Only emit every secret once per object
     if (!this.emittedMeta.has(jsonKey || '')) {

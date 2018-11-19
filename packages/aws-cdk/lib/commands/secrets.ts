@@ -4,7 +4,7 @@ import colors = require('colors/safe');
 import table = require('table');
 import util = require('util');
 import yargs = require('yargs');
-import { print, warning } from '../../lib/logging';
+import { debug, print, warning } from '../../lib/logging';
 import { Mode } from '../api/aws-auth/credentials';
 import { collectMetadataEntries } from '../api/cxapp/stacks';
 import { SDK } from '../api/util/sdk';
@@ -42,7 +42,11 @@ export async function realHandler(options: CommandOptions): Promise<number> {
   if (options.args.write) {
     await writeSecret(store, secrets, options.args.write, options.args.value);
   } else {
-    await printSecrets(secrets);
+    if (options.args.json) {
+      process.stdout.write(JSON.stringify(secrets.map(x => x[1]), undefined, 2));
+    } else {
+      await printSecrets(secrets);
+    }
   }
 
   return 0;
@@ -50,9 +54,9 @@ export async function realHandler(options: CommandOptions): Promise<number> {
 
 async function printSecrets(secrets: NumberedSecret[]) {
   // Print config by default
-  const data: any[] = [[colors.green('#'), colors.green('Secret'), colors.green('Has Value?'), colors.green('Used')]];
+  const data: any[] = [[colors.green('#'), colors.green('Secret'), colors.green('Used')]];
   for (const [i, secret] of secrets) {
-    data.push([i, describeSecret(secret.secret), '*****', secret.paths.join(' ')]);
+    data.push([i, describeSecret(secret.secret), secret.paths.join(' ')]);
   }
 
   print(`Secrets used this app:\n`);
@@ -60,21 +64,33 @@ async function printSecrets(secrets: NumberedSecret[]) {
   print(table.table(data, {
       border: table.getBorderCharacters('norc'),
       columns: {
-        1: { width: 50, wrapWord: true } as any,
-        3: { width: 50, wrapWord: true } as any
+        1: { wrapWord: true } as any,
+        2: { width: 60, wrapWord: true } as any
       }
   }));
+
+  // tslint:disable-next-line:max-line-length
+  print(`Run ${colors.blue('cdk secrets --write KEY_OR_NUMBER')} to write a secret's value to Secrets Manager.`);
 }
 
 async function writeSecret(store: SecretsStore, secrets: NumberedSecret[], identifier: string, value?: string) {
   const secret = selectSecret(secrets, identifier);
-  if (secret.secret.versionId) {
-    throw new Error('Cannot set a value for this secret because it uses a version');
+  if (secret.secret.versionId || secret.secret.versionStage) {
+    throw new Error('Cannot set a value for this secret because it uses a versionId or versionStage');
   }
   if (!value) {
-    value = await prompt(`New value for secret ${secret.secret.identifier}:`, { silent: true });
+    for (let attempts = 0; attempts < 3; attempts++) {
+      const value1 = await prompt(`New value for secret ${colors.blue(describeSecret(secret.secret))}:`, { silent: true });
+      const value2 = await prompt(`Confirm new secret value:`, { silent: true });
+      if (value1 === value2) {
+        value = value1;
+        break;
+      }
+
+      warning('Secret values do not match. Try again.');
+    }
     if (!value) {
-      throw new Error('Aborted because of empty value');
+      throw new Error('Too many failed attempts. Stopping');
     }
   }
 
@@ -114,17 +130,20 @@ function collectSecrets(stacks: cxapi.SynthesizedStack[]): NumberedSecret[] {
 }
 
 function selectSecret(secrets: NumberedSecret[], description: string) {
-  const n = parseInt(description, 10);
+  let n = parseInt(description, 10);
   if (`${n}` !== description) {
-    throw new Error(`Supply a secret number, got: ${description}`);
+    // Not a number, so set to a number that cannot match any entry
+    n = -1;
   }
 
+  // Select by key
   for (const [i, secret] of secrets) {
-    if (n === i) {
+    if (n === i || describeSecret(secret.secret) === description) {
       return secret;
     }
   }
-  throw new Error(`No context secret with number: ${description}`);
+
+  throw new Error(`No secret with name or number: ${description}`);
 }
 
 function enumerate1<T>(xs: T[]): Array<[number, T]> {
@@ -170,15 +189,58 @@ class SecretsStore {
   public async putValue(secret: Secret, value: string) {
     // FIXME: JSON value
     const client = await this.client(secret.environment, Mode.ForWriting);
-    await client.putSecretValue({
-      SecretId: secret.secret.identifier,
-      SecretString: value,
-      VersionStages: secret.secret.versionStage ? [secret.secret.versionStage] : undefined,
-    }).promise();
-  }
 
-  public async hasValue(secret: Secret) {
-    // const client = await this.client(secret.environment, Mode.ForReading);
+    // First get/check the existing value
+    debug(`Looking for existing secret with identifier ${secret.secret.identifier}`);
+    let existingValue;
+    try {
+      existingValue = await client.getSecretValue({
+        SecretId: secret.secret.identifier,
+        VersionStage: secret.secret.versionStage
+      }).promise();
+    } catch (e) {
+      if (e.code !== 'ResourceNotFoundException' && e.message.indexOf('because it was deleted') === -1) { throw e; }
+      existingValue = undefined;
+    }
+
+    if (existingValue && existingValue.SecretBinary) {
+      throw new Error('Cannot update a binary secret');
+    }
+
+    let newValue: string;
+    if (secret.secret.jsonKey) {
+      // Update or set field in JSON
+      let parsed: any = {};
+      if (existingValue) {
+        debug(`Updating field '${secret.secret.jsonKey}' in existing secret value`);
+        try {
+          parsed = JSON.parse(existingValue.SecretString!);
+        } catch (e) {
+          throw new Error('Existing value is not a JSON object, so cannot update JSON field in secret');
+        }
+      }
+      parsed[secret.secret.jsonKey] = value;
+      newValue = JSON.stringify(parsed);
+    } else {
+      // Replace entire string
+      newValue = value;
+    }
+
+    let response;
+    if (existingValue) {
+      debug(`Updating secret with identifier ${secret.secret.identifier}`);
+      response = await client.putSecretValue({
+        SecretId: secret.secret.identifier,
+        SecretString: newValue,
+      }).promise();
+    } else {
+      debug(`Creating secret with identifier ${secret.secret.identifier}`);
+      response = await client.createSecret({
+        Name: secret.secret.identifier,
+        SecretString: newValue,
+      }).promise();
+    }
+    print(`Successfully wrote secret ${colors.blue(response.ARN!)}. Redeploy to apply the new value to your app.`);
   }
 
   private client(environment: cxapi.Environment, mode: Mode): Promise<AWS.SecretsManager> {
